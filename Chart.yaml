@@ -1,0 +1,8 @@
+apiVersion: v2
+name: kubevirt-tenants
+description: >-
+  Hosting-side resources of CAPK (KubeVirt) tenant clusters: one namespace per tenant with
+  scoped credentials for CAPK, the KubeVirt CSI driver and CCM, and NetworkPolicies isolating
+  the tenant VMs on the hosting pod network
+type: application
+version: 0.1.0

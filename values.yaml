@@ -1,0 +1,65 @@
+# ======================================================================================================
+# Release on the hosting workload cluster (the KubeVirt cluster running the VMs of the tenant clusters)
+# ======================================================================================================
+
+# Tenants of this KubeVirt (hosting) cluster; a tenant is the namespace of the VMs of one CAPK cluster
+tenants: {}
+  # <tenant>:
+  #   namespace: <tenant>  # namespace of the tenant VMs (default: the tenant name)
+  #   management_namespace: <namespace>  # not used here: read by sylva-units to build credentials_stores
+  #   addresses:  # required: IPs the tenant Services may use (cluster VIPs, LoadBalancer IPs);
+  #               # IPv4 addresses or CIDRs (/28 at most)
+  #     - 192.0.2.16/29
+  #     - 192.0.2.30
+  #   resource_quota: {}  # ResourceQuota spec.hard
+  #   network_policy:
+  #     enabled: true
+  #     egress_denied_cidrs: []  # added to the default denied CIDRs
+  #     ingress_allowed_ports: []  # replaces the top-level ingress_allowed_ports for this tenant
+
+# API server address (IP or DNS name, e.g. the VIP) of this cluster, for the tenant kubeconfigs (set by
+# sylva-units): must be reachable from the management cluster and from the tenant cluster nodes
+api_server_address: ""
+
+# Ports of the tenant VMs allowed from anywhere: the VIP ports (API, RKE2 supervisor, ingress) and the
+# NodePort range (TCP and UDP), targeted by the kubevirt-ccm LoadBalancer Services
+ingress_allowed_ports:
+  - {protocol: TCP, port: 6443}
+  - {protocol: TCP, port: 9345}
+  - {protocol: TCP, port: 80}
+  - {protocol: TCP, port: 443}
+  - {protocol: TCP, port: 30000, endPort: 32767}
+  - {protocol: UDP, port: 30000, endPort: 32767}
+
+# Pod CIDRs of the hosting cluster, denied to tenant VMs (IPv6 entries are ignored)
+pods_cidrs: []
+
+# Node network CIDRs of the hosting cluster, denied to tenant VMs except on TCP 6443, the hosting API
+# (IPv6 entries are ignored)
+nodes_cidrs: []
+
+# Priority classes the tenant VMs may use, besides none: the others could preempt hosting workloads
+allowed_priority_classes: []
+
+# Deny egress to 169.254.169.254, which would expose the hosting node identity (OpenStack)
+deny_metadata_service: false
+
+# Creates a per-tenant IPAddressPool and L2Advertisement; disable when another load balancer
+# (e.g. kube-vip) exposes the tenant addresses
+metallb:
+  enabled: true
+  namespace: metallb-system
+  # L2Advertisement node selectors (LabelSelector list); empty means all nodes
+  node_selectors: []
+
+# ======================================================================================================
+# A 2nd release on management cluster, with only credentials_stores (kubevirt-tenants-credentials unit)
+# ======================================================================================================
+
+# ClusterSecretStores through which the tenant clusters read the credentials of their tenant
+credentials_stores: {}
+  # <store name>:
+  #   kubeconfig_secret: {name: <cluster>-kubeconfig, namespace: <ns>, key: value}  # of the hosting cluster
+  #   remote_namespace: <tenant namespace>  # the only namespace of the hosting cluster the store reads
+  #   namespaces: [<namespace>]  # the management cluster namespace of the tenant cluster, the only one that can use
+  #                              # the store

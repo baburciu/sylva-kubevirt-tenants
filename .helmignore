@@ -1,0 +1,7 @@
+# not part of the chart package (the chart is at the repository root)
+.git/
+.gitignore
+tests/
+values.schema.yaml
+utils/
+.pre-commit-config.yaml

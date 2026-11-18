@@ -1,0 +1,11 @@
+---
+repos:
+  - repo: local
+    hooks:
+      - id: update-json-schema
+        name: Update JSON schema
+        entry: utils/generate_schema.sh
+        language: python
+        additional_dependencies: [PyYAML]
+        pass_filenames: false
+        files: ^(values\.schema\.(yaml|json)|utils/_yaml2json\.py|utils/generate_schema\.sh)$

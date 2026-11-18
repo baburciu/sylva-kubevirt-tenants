@@ -1,0 +1,64 @@
+{{- /*
+Limits what the tenant credentials can put in a VM: no toleration, no priority class beyond the allowed ones,
+no steered live migration.
+Only creations and spec changes are checked: the controllers keep updating status and finalizers.
+*/ -}}
+{{- range $tenant, $tenant_def := .Values.tenants }}
+{{- $ns := $tenant_def.namespace | default $tenant }}
+{{- $labels := tuple $ $tenant | include "kubevirt-tenants.labels" }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: kubevirt-tenant-{{ $tenant }}-vms
+  labels:
+    {{- $labels | nindent 4 }}
+  annotations:
+    # the namespace is kept on tenant removal: so is its isolation
+    helm.sh/resource-policy: keep
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: {{ $ns }}
+    resourceRules:
+      - apiGroups: [kubevirt.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE]
+        resources: [virtualmachines]
+      - apiGroups: [kubevirt.io]
+        apiVersions: ["*"]
+        operations: [CREATE]
+        resources: [virtualmachineinstances, virtualmachineinstancemigrations]
+  matchConditions:
+    - name: new-spec
+      expression: "oldObject == null || object.spec != oldObject.spec"
+  variables:
+    - name: is_migration
+      expression: "request.resource.resource == 'virtualmachineinstancemigrations'"
+    # the VMI spec, also in the template of a VM
+    - name: spec
+      expression: "request.resource.resource == 'virtualmachines' ? object.spec.template.spec : object.spec"
+  validations:
+    - expression: "variables.is_migration || !has(variables.spec.tolerations) || size(variables.spec.tolerations) == 0"
+      message: "VMs of KubeVirt tenant {{ $tenant }} cannot have tolerations"
+    - expression: >-
+        variables.is_migration || !has(variables.spec.priorityClassName) ||
+        variables.spec.priorityClassName in {{ $.Values.allowed_priority_classes | toJson }}
+      message: "VMs of KubeVirt tenant {{ $tenant }} cannot use this priority class (allowed: none{{ with $.Values.allowed_priority_classes }}, {{ join ", " . }}{{ end }})"
+    - expression: "!variables.is_migration || object.spec.all(f, f == 'vmiName')"
+      message: "migrations of KubeVirt tenant {{ $tenant }} can only name the VMI to migrate (no addedNodeSelector, sendTo, receive...)"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: kubevirt-tenant-{{ $tenant }}-vms
+  labels:
+    {{- $labels | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  policyName: kubevirt-tenant-{{ $tenant }}-vms
+  validationActions: [Deny]
+{{- end }}

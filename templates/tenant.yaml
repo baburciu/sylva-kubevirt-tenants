@@ -1,0 +1,139 @@
+{{- range $tenant, $tenant_def := .Values.tenants }}
+{{- $tenant_def = $tenant_def | default dict }}
+{{- $ns := $tenant_def.namespace | default $tenant }}
+{{- $labels := tuple $ $tenant | include "kubevirt-tenants.labels" }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+    # virt-launcher pods need privileged
+    pod-security.kubernetes.io/enforce: privileged
+  annotations:
+    # never delete the tenant VMs and disks with the tenant or the release
+    helm.sh/resource-policy: keep
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: capk-tenant
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+---
+# token of the tenant kubeconfig (see README)
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/service-account-token
+metadata:
+  name: capk-tenant-token
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+  annotations:
+    kubernetes.io/service-account.name: capk-tenant
+{{- with $.Values.api_server_address }}
+---
+# API server URL of the tenant kubeconfig
+apiVersion: v1
+kind: Secret
+metadata:
+  name: capk-tenant-api
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+stringData:
+  server: {{ printf "https://%s:6443" . | quote }}
+{{- end }}
+---
+# union of what CAPK, the KubeVirt CSI driver (controller-tenant mode) and the KubeVirt CCM need
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: capk-tenant
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+rules:
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachines, virtualmachineinstances]
+    verbs: ["*"]
+  - apiGroups: [subresources.kubevirt.io]
+    resources:
+      - virtualmachines/addvolume
+      - virtualmachines/removevolume
+      - virtualmachineinstances/addvolume
+      - virtualmachineinstances/removevolume
+    verbs: [update]
+  # CAPK live-migrates the VMIs of a draining hosting node
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachineinstancemigrations]
+    verbs: [create]
+  - apiGroups: [cdi.kubevirt.io]
+    resources: [datavolumes]
+    verbs: [get, list, watch, create, delete]
+  - apiGroups: [snapshot.storage.k8s.io]
+    resources: [volumesnapshots]
+    verbs: [get, create, delete]
+  - apiGroups: [""]
+    resources: [secrets, services]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+  # not for the controllers: lets the tenant owner use 'virtctl ssh' / 'virtctl port-forward' on the VMs
+  - apiGroups: [subresources.kubevirt.io]
+    resources:
+      - virtualmachines/portforward
+      - virtualmachineinstances/portforward
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: capk-tenant
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: capk-tenant
+subjects:
+  - kind: ServiceAccount
+    name: capk-tenant
+    namespace: {{ $ns }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubevirt-tenant-{{ $tenant }}-pv-reader
+  labels:
+    {{- $labels | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubevirt-tenant-pv-reader
+subjects:
+  - kind: ServiceAccount
+    name: capk-tenant
+    namespace: {{ $ns }}
+{{- with $tenant_def.resource_quota }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: capk-tenant
+  namespace: {{ $ns }}
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  hard:
+    {{- toYaml . | nindent 4 }}
+{{- end }}
+{{- end }}
